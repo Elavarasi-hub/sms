@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, List, Optional
@@ -8,7 +9,9 @@ from sqlalchemy.orm import sessionmaker, Session
 # =========================
 # DATABASE SETUP
 # =========================
-DATABASE_URL = "postgresql://postgres:elapapa1@localhost:5432/studentdb"
+#DATABASE_URL = "postgresql://postgres:elapapa1@localhost:5432/studentdb"
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 # For MySQL, use:
 # DATABASE_URL = "mysql+mysqlclient://root:yourpassword@localhost:3306/studentdb"
 
