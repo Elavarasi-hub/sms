@@ -1,8 +1,37 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, List, Optional
+from sqlalchemy import create_engine, Column, Integer, String, JSON
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session    
 
+# =========================
+# DATABASE SETUP
+# =========================
+DATABASE_URL = "postgresql://postgres:elapapa1@localhost:5432/studentdb"
+# For MySQL, use:
+# DATABASE_URL = "mysql+mysqlclient://root:yourpassword@localhost:3306/studentdb"
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# =========================
+# MODEL DEFINITIONS
+# =========================
+class StudentDB(Base):
+    __tablename__ = "students"
+    sid = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    marks = Column(JSON, nullable=False)  # store dict as JSON
+
+Base.metadata.create_all(bind=engine)
+
+# =========================
+# FASTAPI APP
+# =========================
 app = FastAPI(title="Student Management System")
+
 
 @app.get("/")
 async def root():           
@@ -22,7 +51,14 @@ class Student(BaseModel):
 class StudentsList(BaseModel):
     students: List[Student]
 
-
+# Dependency for DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+# db_dependency = Annotetion[Session, "Depends(get_db)"]
 # In-memory students store for demo purposes
 # NOTE: Hardcoded demo data commented out. Provide students via the API
 # (e.g. POST /students/replace or POST /students/append). Keeping
@@ -38,9 +74,11 @@ students: List[dict] = []
 
 
 @app.post("/add-new-student/")
-def add_new_students(new_students: List[Student]):
+def add_new_students(new_students: List[Student], db: Session = Depends(get_db)):
     for s in new_students:
-        students.append(s.dict())
+        db_student = StudentDB(sid=s.sid, name=s.name, marks=s.marks)        
+        db.add(db_student)
+    db.commit()
     return {"added": len(new_students)}
 
 
@@ -63,30 +101,42 @@ def append_students(payload: StudentsList):
 
 
 @app.get("/get-student/{sid}")
-def get_student(sid: int):
-    for student in students:
-        if student.get('sid') == sid:
-            return student
-    return {"error": "Student not found"}
+def get_student(sid: int, db: Session = Depends(get_db)):
+    student = db.query(StudentDB).filter(StudentDB.sid == sid).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return student
+    # for student in students:
+    #     if student.get('sid') == sid:
+    #         return student
+    # return {"error": "Student not found"}
 
 
 @app.put("/update-student/{sid}")
-def update_student(sid: int, updated_student: Student):
-    for idx, student in enumerate(students):
-        if student.get('sid') == sid:
-            students[idx] = updated_student.dict()
-            return students[idx]
-    return {"error": "Student not found"}
+def update_student(sid: int, updated_student: Student, db: Session = Depends(get_db)):
+    student = db.query(StudentDB).filter(StudentDB.sid == sid).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    student.name = updated_student.name
+    student.marks = updated_student.marks
+    db.commit()
+    db.refresh(student)
+    return student
 
 
 @app.delete("/delete-student/{sid}")
-def delete_student(sid: int):
-    for student in list(students):
-        if student.get('sid') == sid:
-            students.remove(student)
-            return {"message": "Student deleted successfully"}
-    return {"error": "Student not found"}
-
+def delete_student(sid: int, db: Session = Depends(get_db)):
+    student = db.query(StudentDB).filter(StudentDB.sid == sid).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    db.delete(student)
+    db.commit()
+    return {"message": "Student deleted successfully"}
+    
+@app.get("/students")
+def get_all_students(db: Session = Depends(get_db)):
+    students = db.query(StudentDB).all()
+    return students
 
 @app.post("/report-card/")
 def generate_report_card(student: Student):
